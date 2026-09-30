@@ -16,7 +16,7 @@ import asyncio
 import datetime
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .config import RUNS
 from .data import CATEGORIES, tickets
@@ -46,18 +46,36 @@ THINKING = {"thinking": {"type": "enabled", "budget_tokens": 1024}}
 FLOW_PER_DAY = 50_000
 
 
+# Разобранные обращения: пары «текст, ответ» на границах категорий.
+# Придуманы сами, не из tickets.jsonl
+EXAMPLES = [
+    (
+        "Оплатил подписку, а в выписке списание прошло дважды по 990 р, "
+        "платёж P-40517. Верните лишнее!",
+        "платежи",
+    ),
+    (
+        "Почему выручка за вчера до сих пор не пришла на расчётный счёт? "
+        "Какие вообще сроки вывода на вашем тарифе?",
+        "тарифы",
+    ),
+]
+
+
 @dataclass
 class Candidate:
     name: str
     system: str
     body: Dict[str, Any] = field(default_factory=dict)  # добавка к запросу
     max_tokens: int = 16
+    examples: List[Tuple[str, str]] = field(default_factory=list)  # (текст, ответ)
 
 
 CANDIDATES = [
     Candidate("короткая постановка", SHORT),
     Candidate("постановка с правилами", DETAILED),
     Candidate("правила + рассуждение", DETAILED, body=THINKING, max_tokens=2048),
+    Candidate("правила + примеры", DETAILED, examples=EXAMPLES),
 ]
 
 
@@ -75,11 +93,14 @@ class Row:
 
 
 def prompt(cand: Candidate, row: Dict[str, Any]) -> List[Dict[str, str]]:
-    """Постановка кандидата и текст обращения"""
-    return [
-        {"role": "system", "content": cand.system},
-        {"role": "user", "content": row["text"]},
-    ]
+    """Постановка кандидата, разобранные примеры и текст обращения"""
+    messages = [{"role": "system", "content": cand.system}]
+    for text, answer in cand.examples:
+        messages += [
+            {"role": "user", "content": text},
+            {"role": "assistant", "content": answer},
+        ]
+    return messages + [{"role": "user", "content": row["text"]}]
 
 
 def parse_category(text: str) -> Optional[str]:
